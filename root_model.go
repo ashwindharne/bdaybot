@@ -16,7 +16,7 @@ type RootModel struct {
 
 func NewRootModel(db *sql.DB) RootModel {
 	var rootModel tea.Model
-	pnf := InitPNF(db)
+	pnf := EmptyPhoneNumberForm(db)
 	rootModel = &pnf
 	return RootModel{model: rootModel}
 }

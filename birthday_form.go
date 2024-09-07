@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// BIRTHDAY FORM KEYMAPS
 type bfKeyMap struct {
 	Back key.Binding
 	Quit key.Binding
@@ -37,12 +38,10 @@ var bfKeys = bfKeyMap{
 	),
 }
 
+// BIRTHDAY FORM MODEL
+
 type bfState struct {
 	phoneNumber string
-	name        string
-	month       int
-	day         string
-	year        string
 	editingId   int
 }
 
@@ -54,7 +53,10 @@ type BfModel struct {
 	lg     *lipgloss.Renderer
 	db     *sql.DB
 	km     bfKeyMap
+	error  string
 }
+
+// BIRTHDAY FORM INITIALIZATION AND VALIDATION
 
 func validateDay(day string) error {
 	if day == "" {
@@ -85,21 +87,14 @@ func validateYear(year string) error {
 	return nil
 }
 
-func PopulatedBF(initState bfState, db *sql.DB) BfModel {
-	bf := BfModel{
-		state: initState,
-		db:    db,
-		lg:    lipgloss.DefaultRenderer(),
-		km:    bfKeys,
-	}
-	bf.styles = NewStyles(bf.lg)
-	bf.form = huh.NewForm(
+func PopulatedForm(name string, month int, day string, year string) *huh.Form {
+	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
 				Key("name").
 				Title("Name").
 				Description("Enter the name of the person whose birthday you'd like to be reminded of").
-				Value(&bf.state.name),
+				Value(&name),
 			huh.NewSelect[int]().
 				Key("month").
 				Title("Month").
@@ -117,20 +112,20 @@ func PopulatedBF(initState bfState, db *sql.DB) BfModel {
 					huh.NewOption("November", 11),
 					huh.NewOption("December", 12),
 				).
-				Value(&bf.state.month).
+				Value(&month).
 				Description("Enter the month of their birthday."),
 			huh.NewInput().
 				Title("Day").
 				Description("Enter the day of their birthday.").
 				Key("day").
-				Value(&bf.state.day).
+				Value(&day).
 				CharLimit(2).
 				Validate(validateDay),
 			huh.NewInput().
 				Title("Year").
 				Key("year").
 				Description("Enter the year of their birthday.").
-				Value(&bf.state.year).
+				Value(&year).
 				CharLimit(4).
 				Validate(validateYear),
 			huh.NewConfirm().
@@ -140,74 +135,98 @@ func PopulatedBF(initState bfState, db *sql.DB) BfModel {
 				Negative("Nope"),
 		),
 	)
+	return form
+}
+
+func EmptyBirthdayForm(phoneNumber string, db *sql.DB) BfModel {
+	bf := BfModel{
+		state: bfState{
+			phoneNumber: phoneNumber,
+		},
+		db: db,
+		lg: lipgloss.DefaultRenderer(),
+		km: bfKeys,
+	}
+	bf.styles = NewStyles(bf.lg)
+	bf.form = PopulatedForm("", 1, "", "")
 	return bf
 }
 
-func InitBF(phoneNumber string, db *sql.DB) BfModel {
-	initState := bfState{
-		phoneNumber: phoneNumber,
-		day:         "1",
-		month:       1,
-		year:        "1",
+func EditBirthdayForm(phoneNumber string, editingId int, db *sql.DB) BfModel {
+	bf := BfModel{
+		state: bfState{
+			phoneNumber: phoneNumber,
+			editingId:   editingId,
+		},
+		db: db,
+		lg: lipgloss.DefaultRenderer(),
+		km: bfKeys,
 	}
-	return PopulatedBF(initState, db)
+	bf.styles = NewStyles(bf.lg)
+	bf.form = PopulatedForm("", 1, "", "")
+	return bf
 }
 
-func EditBF(phoneNumber string, editingId int, db *sql.DB) BfModel {
-	initState := bfState{
-		phoneNumber: phoneNumber,
-	}
-	day, year := 0, 0
-	err := db.QueryRow(`
-SELECT id, name, month, day, year
-FROM birthdays
-WHERE id = ?
-`, editingId).Scan(&initState.editingId, &initState.name, &initState.month, &day, &year)
-	if err != nil {
-		panic(err)
-	}
-	initState.day = strconv.Itoa(day)
-	initState.year = strconv.Itoa(year)
-	return PopulatedBF(initState, db)
+// BIRTHDAY FORM COMMANDS
+
+type birthdayRetrievalMsg struct {
+	name  string
+	month int
+	day   int
+	year  int
 }
+
+func getBirthday(db *sql.DB, birthdayId int) tea.Cmd {
+	return func() tea.Msg {
+		var name string
+		var month, day, year int
+		row := db.QueryRow(`
+select name, month, day, year 
+from birthdays
+where id = ?;`, birthdayId)
+		err := row.Scan(&name, &month, &day, &year)
+		if err != nil {
+			return dbErrMsg{err}
+		}
+		return birthdayRetrievalMsg{name, month, day, year}
+	}
+}
+
+func createBirthday(db *sql.DB, phoneNumber string, name string, month int, day int, year int) tea.Cmd {
+	return func() tea.Msg {
+		_, err := db.Exec(`
+insert into birthdays (phone_number_id, name, month, day, year)
+values (
+	(select id from phone_numbers where phone_number = ?),
+	?, ?, ?, ?
+);`, phoneNumber, name, month, day, year)
+		if err != nil {
+			return dbErrMsg{err}
+		}
+		return dbSuccessMsg{}
+	}
+}
+
+func updateBirthday(db *sql.DB, birthdayId int, name string, month int, day int, year int) tea.Cmd {
+	return func() tea.Msg {
+		_, err := db.Exec(`
+update birthdays
+set name = ?, month = ?, day = ?, year = ?
+where id = ?;`, name, month, day, year, birthdayId)
+		if err != nil {
+			return dbErrMsg{err}
+		}
+		return dbSuccessMsg{}
+	}
+}
+
+// BIRTHDAY FORM UPDATE-VIEW LOOP
 
 func (m *BfModel) Init() tea.Cmd {
-	return m.form.PrevField()
-}
-
-func submitChanges(m *BfModel) {
-	if m.form.GetBool("confirm") {
-		dayStr, yearStr := m.form.GetString("day"), m.form.GetString("year")
-		day, err1 := strconv.Atoi(dayStr)
-		year, err2 := strconv.Atoi(yearStr)
-		if err1 != nil {
-			panic(err1)
-		}
-		if err2 != nil {
-			panic(err2)
-		}
-		if m.state.editingId == 0 {
-			_, err := m.db.Exec(`
-INSERT INTO BIRTHDAYS 
-(phone_number_id, name, month, day, year)
-values (
-(select id from phone_numbers where phone_number = ?),
-?, ?, ?, ?
-)
-`, m.state.phoneNumber, m.form.Get("name"), m.form.GetInt("month"), day, year)
-			if err != nil {
-				panic(err)
-			}
-		} else {
-			_, err := m.db.Exec(`
-UPDATE birthdays
-SET name = ?, month = ?, day = ?, year = ?
-WHERE id = ?
-`, m.form.Get("name"), m.form.GetInt("month"), day, year, m.state.editingId)
-			if err != nil {
-				panic(err)
-			}
-		}
+	if m.state.editingId == 0 {
+		return m.form.PrevField()
+	} else {
+		return getBirthday(m.db, m.state.editingId)
 	}
 }
 
@@ -221,23 +240,48 @@ func (m *BfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.km.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, m.km.Back):
-			bt := InitBT(m.state.phoneNumber, m.db)
+			bt := EmptyBirthdayTable(m.state.phoneNumber, m.db)
 			return NewRootModel(m.db).Navigate(&bt)
 		}
+	case birthdayRetrievalMsg:
+		m.form = PopulatedForm(msg.name, msg.month, strconv.Itoa(msg.day), strconv.Itoa(msg.year))
+		return m, m.form.PrevField()
+	case dbErrMsg:
+		m.error = msg.err.Error()
+		return m, nil
+	case dbSuccessMsg:
+		bt := EmptyBirthdayTable(m.state.phoneNumber, m.db)
+		return NewRootModel(m.db).Navigate(&bt)
 	}
 	f, cmd := m.form.Update(msg)
 	m.form = f.(*huh.Form)
 
 	if m.form.State == huh.StateCompleted {
-		submitChanges(m)
-		bt := InitBT(m.state.phoneNumber, m.db)
-		return NewRootModel(m.db).Navigate(&bt)
+		if m.form.GetBool("confirm") {
+			dayStr, yearStr := m.form.GetString("day"), m.form.GetString("year")
+			day, err1 := strconv.Atoi(dayStr)
+			year, err2 := strconv.Atoi(yearStr)
+			if err1 != nil {
+				panic(err1)
+			}
+			if err2 != nil {
+				panic(err2)
+			}
+			if m.state.editingId == 0 {
+				return m, createBirthday(m.db, m.state.phoneNumber, m.form.GetString("name"), m.form.GetInt("month"), day, year)
+			} else {
+				return m, updateBirthday(m.db, m.state.editingId, m.form.GetString("name"), m.form.GetInt("month"), day, year)
+			}
+		} else {
+			bt := EmptyBirthdayTable(m.state.phoneNumber, m.db)
+			return NewRootModel(m.db).Navigate(&bt)
+		}
 	}
 	return m, cmd
 }
 
 func (m *BfModel) View() string {
-	header := m.appBoundaryView("Birthday Bot")
+	header := m.appBoundaryView("New Birthday Reminder")
 	body := baseStyle.Render(m.form.WithShowHelp(false).View())
 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(slices.Concat(m.km.ShortHelp(), m.form.KeyBinds())))
 	return header + "\n" + body + "\n" + footer

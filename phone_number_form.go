@@ -9,19 +9,16 @@ import (
 	"strconv"
 )
 
-type pnfState struct {
+type PhoneNumberFormModel struct {
 	phoneNumber string
+	form        *huh.Form
+	width       int
+	styles      *Styles
+	lg          *lipgloss.Renderer
+	db          *sql.DB
 }
 
-type PnfModel struct {
-	state  pnfState
-	form   *huh.Form
-	width  int
-	styles *Styles
-	lg     *lipgloss.Renderer
-	db     *sql.DB
-}
-
+// PHONE NUMBER FORM INITIALIZATION AND VALIDATION
 func validateUSPhoneNumber(phoneNumber string) error {
 	if len(phoneNumber) < 12 || len(phoneNumber) > 12 {
 		return fmt.Errorf("must be exactly 12 digits")
@@ -36,13 +33,11 @@ func validateUSPhoneNumber(phoneNumber string) error {
 	return nil
 }
 
-func InitPNF(db *sql.DB) PnfModel {
-	m := PnfModel{
-		state: pnfState{
-			phoneNumber: "+1",
-		},
-		db: db,
-		lg: lipgloss.DefaultRenderer(),
+func EmptyPhoneNumberForm(db *sql.DB) PhoneNumberFormModel {
+	m := PhoneNumberFormModel{
+		phoneNumber: "+1",
+		db:          db,
+		lg:          lipgloss.DefaultRenderer(),
 	}
 	m.styles = NewStyles(m.lg)
 	f := huh.NewForm(
@@ -52,7 +47,7 @@ func InitPNF(db *sql.DB) PnfModel {
 				Title("Enter your phone number.").
 				Description("Please enter the phone number that you would like alerts to be sent to.").
 				Validate(validateUSPhoneNumber).
-				Value(&m.state.phoneNumber),
+				Value(&m.phoneNumber),
 		),
 	).WithShowHelp(false)
 	f.PrevGroup()
@@ -60,11 +55,28 @@ func InitPNF(db *sql.DB) PnfModel {
 	return m
 }
 
-func (m *PnfModel) Init() tea.Cmd {
+// PHONE NUMBER FORM COMMANDS
+
+func insertOrIgnorePhoneNumber(db *sql.DB, phoneNumber string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := db.Exec(`
+INSERT OR IGNORE INTO phone_numbers (phone_number, verified)
+values (?, TRUE);
+`, phoneNumber)
+		if err != nil {
+			return dbErrMsg{err}
+		}
+		return dbSuccessMsg{}
+	}
+}
+
+// PHONE NUMBER FORM UPDATE-VIEW LOOP
+
+func (m *PhoneNumberFormModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m *PnfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *PhoneNumberFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = min(msg.Width, 120) - m.styles.Base.GetHorizontalFrameSize()
@@ -73,29 +85,27 @@ func (m *PnfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		}
+	case dbSuccessMsg:
+		bt := EmptyBirthdayTable(m.phoneNumber, m.db)
+		return NewRootModel(m.db).Navigate(&bt)
 	}
 	f, cmd := m.form.Update(msg)
 	m.form = f.(*huh.Form)
-	phoneNumber := m.form.GetString("phone")
 	if m.form.State == huh.StateCompleted {
-		m.db.Exec(`
-INSERT OR IGNORE INTO phone_numbers (phone_number, verified)
-values (?, TRUE);
-`, phoneNumber)
-		bt := InitBT(phoneNumber, m.db)
-		return NewRootModel(m.db).Navigate(&bt)
+		m.phoneNumber = m.form.GetString("phone")
+		return m, insertOrIgnorePhoneNumber(m.db, m.phoneNumber)
 	}
 	return m, cmd
 }
 
-func (m *PnfModel) View() string {
+func (m *PhoneNumberFormModel) View() string {
 	header := m.appBoundaryView("Birthday Bot")
 	body := m.form.View()
 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
 	return header + "\n" + body + "\n" + footer
 }
 
-func (m *PnfModel) appBoundaryView(text string) string {
+func (m *PhoneNumberFormModel) appBoundaryView(text string) string {
 	return lipgloss.PlaceHorizontal(
 		m.width,
 		lipgloss.Left,
