@@ -2,3 +2,5 @@
 db.sqlite
 .idea
 bdaybot
+notify
+migration
