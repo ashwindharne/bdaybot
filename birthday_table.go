@@ -74,7 +74,12 @@ type BtModel struct {
 }
 
 // BIRTHDAY TABLE INITIALIZATION
-func EmptyBirthdayTable(phoneNumber string, db *sql.DB) BtModel {
+func EmptyBirthdayTable(
+	phoneNumber string,
+	db *sql.DB,
+	lg *lipgloss.Renderer,
+	styles *Styles,
+) BtModel {
 	columns := []table.Column{
 		{Title: "ID", Width: 0},
 		{Title: "Name", Width: 24},
@@ -107,9 +112,9 @@ func EmptyBirthdayTable(phoneNumber string, db *sql.DB) BtModel {
 		db:          db,
 		help:        h,
 		km:          btKeys,
+		lg:          lg,
+		styles:      styles,
 	}
-	m.lg = lipgloss.DefaultRenderer()
-	m.styles = NewStyles(m.lg)
 	return m
 
 }
@@ -185,14 +190,14 @@ func (m *BtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, m.km.Create):
 			newForm := EmptyBirthdayForm(m.phoneNumber, m.db)
-			return NewRootModel(m.db).Navigate(&newForm)
+			return EmptyRootModel(m).Navigate(&newForm)
 		case key.Matches(msg, m.km.Edit):
 			editingId, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
 				panic(err)
 			}
 			editForm := EditBirthdayForm(m.phoneNumber, editingId, m.db)
-			return NewRootModel(m.db).Navigate(&editForm)
+			return EmptyRootModel(m).Navigate(&editForm)
 		}
 	case getBirthdaysSuccessMsg:
 		var rows []table.Row
@@ -215,8 +220,8 @@ func (m *BtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *BtModel) View() string {
-	header := m.appBoundaryView("Birthday")
-	body := baseStyle.Render(m.table.View())
+	header := m.appBoundaryView("Birthday Reminders")
+	body := m.styles.Base.Render(m.table.View())
 	footer := m.appBoundaryView(m.help.ShortHelpView(m.km.ShortHelp()))
-	return header + "\n\n" + body + "\n" + footer
+	return header + "\n" + body + "\n" + footer
 }

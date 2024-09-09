@@ -13,6 +13,7 @@ type PhoneNumberFormModel struct {
 	phoneNumber string
 	form        *huh.Form
 	width       int
+	height      int
 	styles      *Styles
 	lg          *lipgloss.Renderer
 	db          *sql.DB
@@ -33,13 +34,17 @@ func validateUSPhoneNumber(phoneNumber string) error {
 	return nil
 }
 
-func EmptyPhoneNumberForm(db *sql.DB) PhoneNumberFormModel {
+func EmptyPhoneNumberForm(
+	db *sql.DB,
+	renderer *lipgloss.Renderer,
+	styles *Styles,
+) PhoneNumberFormModel {
 	m := PhoneNumberFormModel{
 		phoneNumber: "+1",
 		db:          db,
-		lg:          lipgloss.DefaultRenderer(),
+		lg:          renderer,
+		styles:      styles,
 	}
-	m.styles = NewStyles(m.lg)
 	f := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
@@ -79,15 +84,21 @@ func (m *PhoneNumberFormModel) Init() tea.Cmd {
 func (m *PhoneNumberFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = min(msg.Width, 120) - m.styles.Base.GetHorizontalFrameSize()
+		m.width = min(msg.Width, 80) - m.styles.Base.GetHorizontalFrameSize()
+		m.height = min(msg.Height, 20) - m.styles.Base.GetVerticalFrameSize()
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
 		}
 	case dbSuccessMsg:
-		bt := EmptyBirthdayTable(m.phoneNumber, m.db)
-		return NewRootModel(m.db).Navigate(&bt)
+		bt := EmptyBirthdayTable(
+			m.phoneNumber,
+			m.db,
+			m.lg,
+			m.styles,
+		)
+		return EmptyRootModel(m).Navigate(&bt)
 	}
 	f, cmd := m.form.Update(msg)
 	m.form = f.(*huh.Form)
@@ -99,6 +110,7 @@ func (m *PhoneNumberFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *PhoneNumberFormModel) View() string {
+
 	header := m.appBoundaryView("Birthday Bot")
 	body := m.form.View()
 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(m.form.KeyBinds()))
@@ -108,7 +120,7 @@ func (m *PhoneNumberFormModel) View() string {
 func (m *PhoneNumberFormModel) appBoundaryView(text string) string {
 	return lipgloss.PlaceHorizontal(
 		m.width,
-		lipgloss.Left,
+		lipgloss.Center,
 		m.styles.HeaderText.Render(text),
 		lipgloss.WithWhitespaceChars("/"),
 		lipgloss.WithWhitespaceForeground(indigo),

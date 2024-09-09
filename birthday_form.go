@@ -234,14 +234,19 @@ func (m *BfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = min(msg.Width, 120) - m.styles.Base.GetHorizontalFrameSize()
+		m.width = min(msg.Width, 80) - m.styles.Base.GetHorizontalFrameSize()
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.km.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, m.km.Back):
-			bt := EmptyBirthdayTable(m.state.phoneNumber, m.db)
-			return NewRootModel(m.db).Navigate(&bt)
+			bt := EmptyBirthdayTable(
+				m.state.phoneNumber,
+				m.db,
+				m.lg,
+				m.styles,
+			)
+			return EmptyRootModel(m).Navigate(&bt)
 		}
 	case birthdayRetrievalMsg:
 		m.form = PopulatedForm(msg.name, msg.month, strconv.Itoa(msg.day), strconv.Itoa(msg.year))
@@ -250,8 +255,8 @@ func (m *BfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.error = msg.err.Error()
 		return m, nil
 	case dbSuccessMsg:
-		bt := EmptyBirthdayTable(m.state.phoneNumber, m.db)
-		return NewRootModel(m.db).Navigate(&bt)
+		bt := EmptyBirthdayTable(m.state.phoneNumber, m.db, m.lg, m.styles)
+		return EmptyRootModel(m).Navigate(&bt)
 	}
 	f, cmd := m.form.Update(msg)
 	m.form = f.(*huh.Form)
@@ -273,8 +278,13 @@ func (m *BfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, updateBirthday(m.db, m.state.editingId, m.form.GetString("name"), m.form.GetInt("month"), day, year)
 			}
 		} else {
-			bt := EmptyBirthdayTable(m.state.phoneNumber, m.db)
-			return NewRootModel(m.db).Navigate(&bt)
+			bt := EmptyBirthdayTable(
+				m.state.phoneNumber,
+				m.db,
+				m.lg,
+				m.styles,
+			)
+			return EmptyRootModel(m).Navigate(&bt)
 		}
 	}
 	return m, cmd
@@ -282,7 +292,7 @@ func (m *BfModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *BfModel) View() string {
 	header := m.appBoundaryView("New Birthday Reminder")
-	body := baseStyle.Render(m.form.WithShowHelp(false).View())
+	body := m.styles.Base.Render(m.form.WithShowHelp(false).View())
 	footer := m.appBoundaryView(m.form.Help().ShortHelpView(slices.Concat(m.km.ShortHelp(), m.form.KeyBinds())))
 	return header + "\n" + body + "\n" + footer
 }
@@ -290,7 +300,7 @@ func (m *BfModel) View() string {
 func (m *BfModel) appBoundaryView(text string) string {
 	return lipgloss.PlaceHorizontal(
 		m.width,
-		lipgloss.Left,
+		lipgloss.Center,
 		m.styles.HeaderText.Render(text),
 		lipgloss.WithWhitespaceChars("/"),
 		lipgloss.WithWhitespaceForeground(indigo),

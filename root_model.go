@@ -1,24 +1,15 @@
 package main
 
 import (
-	"database/sql"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
-
-var baseStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("240"))
 
 type RootModel struct {
 	model tea.Model
 }
 
-func NewRootModel(db *sql.DB) RootModel {
-	var rootModel tea.Model
-	pnf := EmptyPhoneNumberForm(db)
-	rootModel = &pnf
-	return RootModel{model: rootModel}
+func EmptyRootModel(page tea.Model) RootModel {
+	return RootModel{model: page}
 }
 
 func (r RootModel) Init() tea.Cmd {
